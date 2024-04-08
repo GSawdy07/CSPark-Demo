@@ -2,7 +2,7 @@
 --abc
 WITH
 -- grouped costs
-grouped_dv360_data_costs AS
+grouped_dv360_dc AS
 (
   SELECT line_item_id,
          "date",

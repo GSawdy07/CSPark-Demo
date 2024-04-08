@@ -1,0 +1,458 @@
+--combined mapped queries
+WITH
+-- grouped costs
+grouped_dv360_data_costs AS
+(
+  SELECT line_item_id,
+         "date",
+         SUM(cpm_fee) AS cpm_cost,
+         SUM(data_fees) AS data_cost,
+         SUM(platform_fee) AS platform_cost
+  FROM mart_clients.dv360_data_costs AS ddc
+  GROUP BY line_item_id,
+           "date"
+),
+grouped_ttd_data_costs AS
+(
+  SELECT ad_group_id,
+         "date",
+         SUM(advertiser_cost_usd) AS cpm_cost,
+         SUM(data_cost_usd) AS data_cost,
+         SUM(partner_cost_usd) AS platform_cost
+  FROM mart_clients.ttd_data_costs AS tdc
+  GROUP BY ad_group_id,
+           "date"
+),
+grouped_xandr_data_costs AS
+(
+  SELECT line_item_id,
+         -- should be id, but COLUMN NOT currently available
+         "date",
+         SUM(cpm_usd) AS cpm_cost,
+         SUM(data_costs) AS data_cost,
+         SUM(third_party_costs) AS platform_cost
+  FROM mart_clients.xandr_data_costs AS xdc
+  GROUP BY line_item_id,
+           "date"
+),
+grouped_mmath_data_costs AS
+(
+  SELECT line_item_id,
+         "date",
+         SUM(data_costs) AS data_cost
+  FROM mart_clients.dsp_mediamath_data_costs AS mdc
+  GROUP BY line_item_id,
+           "date"
+),
+grouped_adtheorent_data_costs AS
+(
+  SELECT line_item_id,
+         "date",
+         SUM(data_spend) AS data_cost
+  FROM mart_clients.dsp_adtheorent_data_costs AS adc
+  GROUP BY line_item_id,
+           "date"
+),
+grouped_hawk_data_costs AS
+(
+  SELECT line_item_id,
+         "date",
+         SUM(third_party_costs) AS data_cost
+  FROM mart_clients.dsp_hawk_data_costs AS hdc
+  GROUP BY line_item_id,
+           "date"
+),
+-- unioning dsps
+all_dsps AS
+(
+  SELECT ddda.line_item_id,
+         ddda.line_item_name,
+         ddda.campaign_name AS insertion_order_name,
+         ddda."date",
+         ddda.impressions,
+         ddda.clicks,
+         ddda.conversions,
+         ddda.conversions_clickthrough,
+         ddda.conversions_viewthrough,
+         ddda.video_started,
+         ddda.video_fully_played,
+         ddda.dsp_media_cost,
+         ddda.currency,
+         ddda.timezone
+  FROM mart_clients.dsp_dv360_daily_activity AS ddda
+  UNION
+  SELECT dtda.ad_group_id AS line_item_id,
+         dtda.ad_group_name AS line_item_name,
+         dtda.campaign_name AS insertion_order_name,
+         dtda."date",
+         dtda.impressions,
+         dtda.clicks,
+         dtda.conversions,
+         dtda.conversions_clickthrough,
+         dtda.conversions_viewthrough,
+         dtda.video_started,
+         dtda.video_fully_played,
+         dtda.dsp_media_cost,
+         'USD' AS currency,
+         dtda.timezone
+  FROM mart_clients.dsp_ttd_daily_activity AS dtda
+  UNION
+  SELECT dxda.line_item_id,
+         dxda.line_item_name,
+         dxda.insertion_order_name,
+         dxda."date",
+         dxda.impressions,
+         dxda.clicks,
+         dxda.conversions,
+         dxda.conversions_clickthrough,
+         dxda.conversions_viewthrough,
+         dxda.video_started,
+         dxda.video_fully_played,
+         dxda.dsp_media_cost,
+         dxda.currency,
+         dxda.timezone
+  FROM mart_clients.dsp_xandr_daily_activity AS dxda
+  UNION
+  SELECT dmda.line_item_id,
+         dmda.line_item_name,
+         dmda.insertion_order_name,
+         dmda."date",
+         dmda.impressions,
+         dmda.clicks,
+         dmda.conversions,
+         dmda.conversions_clickthrough,
+         dmda.conversions_viewthrough,
+         null as video_started,
+         null as video_fully_played,
+         dmda.dsp_media_cost,
+         'USD' as currency,
+         dmda.timezone
+  FROM mart_clients.dsp_mediamath_daily_activity AS dmda
+  UNION
+  SELECT dada.line_item_id,
+         dada.line_item_name,
+         dada.insertion_order_name,
+         dada."date",
+         dada.impressions,
+         dada.clicks,
+         dada.conversions,
+         dada.conversions_clickthrough,
+         dada.conversions_viewthrough,
+         null as video_started,
+         dada.video_fully_played,
+         dada.dsp_media_cost,
+         dada.currency,
+         dada.timezone
+  FROM mart_clients.dsp_adtheorent_daily_activity AS dada
+  UNION
+  SELECT dhda.line_item_id,
+         dhda.line_item_name,
+         dhda.insertion_order_name,
+         dhda."date",
+         dhda.impressions,
+         dhda.clicks,
+         dhda.conversions,
+         null as conversions_clickthrough,
+         null as conversions_viewthrough,
+         dhda.video_started,
+         dhda.video_fully_played,
+         dhda.dsp_media_cost,
+         dhda.currency,
+         dhda.timezone
+  FROM mart_clients.dsp_hawk_daily_activity AS dhda
+),
+dsp_agg AS(
+SELECT 
+         all_dsps.line_item_id,
+         all_dsps.line_item_name,
+         all_dsps.insertion_order_name,
+         all_dsps."date",
+         all_dsps.currency,
+         all_dsps.timezone
+FROM all_dsps
+WHERE all_dsps.currency is not null
+GROUP BY
+         all_dsps.line_item_id,
+         all_dsps.line_item_name,
+         all_dsps.insertion_order_name,
+         all_dsps."date",
+         all_dsps.currency,
+         all_dsps.timezone
+         
+),        
+dsp_results AS (
+SELECT
+         dsp_agg.line_item_id,
+         dsp_agg.line_item_name,
+         dsp_agg.insertion_order_name,
+         dsp_agg."date",
+         dsp_agg.currency,
+         dsp_agg.timezone,
+         SUM(all_dsps.conversions_clickthrough) as conversions_clickthrough,
+         SUM(all_dsps.conversions_viewthrough) as conversions_viewthrough,
+         SUM(all_dsps.video_started) as video_started,
+         SUM(all_dsps.video_fully_played) as video_fully_played,
+         SUM(all_dsps.dsp_media_cost) AS dsp_media_cost,
+         SUM(all_dsps.impressions) as impressions,
+         SUM(all_dsps.clicks) as clicks,
+         sum(all_dsps.conversions) as conversions,
+         xdc.cpm_cost as xandr_cpm_cost,
+         xdc.data_cost as xandr_data_cost,
+         xdc.platform_cost as xandr_platform_cost,
+         ddc.cpm_cost as dv360_cpm_cost,
+         ddc.data_cost as dv360_data_cost,
+         ddc.platform_cost as dv360_platform_cost,
+         tdc.cpm_cost as ttd_cpm_cost,
+         tdc.data_cost as ttd_data_cost,
+         tdc.platform_cost as ttd_platform_cost,
+         mdc.data_cost as mmath_data_cost,
+         adc.data_cost as adtheorent_data_cost,
+         hdc.data_cost as hawk_data_cost
+FROM dsp_agg
+  LEFT JOIN all_dsps as all_dsps
+         ON dsp_agg.line_item_id = all_dsps.line_item_id
+         AND dsp_agg.date = all_dsps.date
+  LEFT JOIN grouped_xandr_data_costs AS xdc
+         ON dsp_agg.line_item_id = xdc.line_item_id
+        AND dsp_agg."date" = xdc."date"
+  LEFT JOIN grouped_ttd_data_costs AS tdc
+         ON dsp_agg.line_item_id = tdc.ad_group_id
+        AND dsp_agg."date" = tdc."date"
+  LEFT JOIN grouped_dv360_data_costs AS ddc
+         ON dsp_agg.line_item_id = ddc.line_item_id
+        AND dsp_agg."date" = ddc."date"
+  LEFT JOIN grouped_mmath_data_costs AS mdc
+         ON dsp_agg.line_item_id = mdc.line_item_id
+        AND dsp_agg."date" = mdc."date"
+  LEFT JOIN grouped_adtheorent_data_costs AS adc
+         ON dsp_agg.line_item_id = adc.line_item_id
+        AND dsp_agg."date" = adc."date"
+  LEFT JOIN grouped_hawk_data_costs AS hdc
+         ON dsp_agg.line_item_id = hdc.line_item_id
+        AND dsp_agg."date" = hdc."date" 
+GROUP BY 
+         dsp_agg.line_item_id,
+         dsp_agg.line_item_name,
+         dsp_agg.insertion_order_name,
+         dsp_agg."date",
+         dsp_agg.currency,
+         dsp_agg.timezone,
+         xdc.cpm_cost,
+         xdc.data_cost,
+         xdc.platform_cost,
+         ddc.cpm_cost,
+         ddc.data_cost,
+         ddc.platform_cost,
+         tdc.cpm_cost,
+         tdc.data_cost,
+         tdc.platform_cost,
+         mdc.data_cost,
+         adc.data_cost,
+         hdc.data_cost
+),
+-- the logic to get the maximum date on the following ones
+-- should be replaced by a filter of the execution date
+-- mapping_team
+mapping_team_max_files_dsp AS (
+    SELECT
+        *,
+    RANK() OVER (PARTITION BY advertiser order by dt_updated desc) as ranked
+    FROM mart_clients.mapping_team AS a
+    WHERE dt_updated >= GETDATE() -2
+),
+latest_mapping_team_dsp AS (
+    SELECT *
+    FROM mapping_team_max_files_dsp
+    WHERE ranked = 1
+),
+-- mapping_budget
+mapping_budget_max_files_dsp AS (
+    SELECT
+        *,
+     RANK() OVER (PARTITION BY campaign_detailed order by dt_updated desc) as ranked
+    FROM mart_clients.mapping_budget AS a
+    WHERE dt_updated >= GETDATE() -2
+),
+latest_mapping_budget_dsp AS (
+    SELECT *
+    FROM mapping_budget_max_files_dsp
+    WHERE ranked = 1
+),
+-- mapping_dspli
+mapping_dspli_max_files_dsp AS (
+    SELECT
+        *,
+     RANK() OVER (PARTITION BY line_item_id order by dt_updated desc) as ranked
+    FROM mart_clients.mapping_dspli AS a
+    WHERE dt_updated >= GETDATE() -2
+),
+latest_mapping_dspli_dsp AS (
+    SELECT *
+    FROM mapping_dspli_max_files_dsp
+    WHERE ranked = 1
+),
+results_dsp AS (
+SELECT
+    lmb.campaign,
+    lmb.campaign_detailed,
+    ad.line_item_id,
+    ad.line_item_name,
+    null as placement_id,
+    null as placement_name,
+    ad.date,
+    SUM(ad.impressions) AS impressions,
+    SUM(ad.clicks) AS clicks,
+    SUM(ad.conversions) AS conversions,
+    null as custom_conversions,
+    SUM(ad.conversions_clickthrough) AS conversions_clickthrough,
+    SUM(ad.conversions_viewthrough) AS conversions_viewthrough,
+    SUM(ad.video_started) AS video_started,
+    SUM(ad.video_fully_played) AS video_fully_played,
+    null as impressions_eligible,
+    null as impressions_measurable,
+    null as impressions_viewable,
+    SUM(ad.dsp_media_cost) AS dsp_media_cost,
+    SUM(COALESCE(ad.xandr_data_cost,0)) + SUM(COALESCE(ad.ttd_data_cost,0)) + SUM(COALESCE(ad.dv360_data_cost,0)) + SUM(COALESCE(ad.mmath_data_cost,0)) + SUM(COALESCE(ad.adtheorent_data_cost,0)) + SUM(COALESCE(ad.hawk_data_cost,0)) AS data_cost,
+    'Hybrid Theory' as data_source
+FROM latest_mapping_team_dsp AS lmt
+LEFT JOIN latest_mapping_budget_dsp AS lmb
+    ON UPPER(lmt.advertiser) = UPPER(lmb.advertiser)
+LEFT JOIN latest_mapping_dspli_dsp AS lmd
+    ON UPPER(lmb.campaign) = UPPER(lmd.campaign)
+LEFT JOIN dsp_results AS ad
+    ON lmd.line_item_id = ad.line_item_id
+    	AND ad.date BETWEEN lmb.mapped_start_date AND lmb.mapped_end_date
+WHERE lmb.dt_updated >= current_date - 1
+	AND lmt.dt_updated >= current_date - 1
+GROUP BY
+    lmb.campaign,
+    lmb.campaign_detailed,
+    ad.line_item_id,
+    ad.line_item_name,
+    placement_id,
+    placement_name,
+    ad.date
+),
+--client numbers
+--SET search_path TO mart_clients;
+ad_server_ranked AS (
+    SELECT
+        *,
+        RANK() OVER (PARTITION BY "date", placement_id order by dt_updated desc) as ranked
+    FROM mart_clients.aggregated_adserver_data
+),
+ad_server_latest AS (
+    SELECT
+        *
+    FROM ad_server_ranked
+    WHERE ranked=1
+),
+-- the logic to get the maximum date on the following ones
+-- should be replaced by a filter of the execution date
+-- mapping_team
+mapping_team_max_files_client AS (
+    SELECT
+        *,
+    RANK() OVER (PARTITION BY advertiser order by dt_updated desc) as ranked
+    FROM mart_clients.mapping_team AS a
+    WHERE dt_updated >= GETDATE() -2
+),
+latest_mapping_team_client AS (
+    SELECT *
+    FROM mapping_team_max_files_client
+    WHERE ranked = 1
+),
+-- mapping_budget
+mapping_budget_max_files_client AS (
+    SELECT
+        *,
+     RANK() OVER (PARTITION BY campaign_detailed order by dt_updated desc) as ranked
+    FROM mart_clients.mapping_budget AS a
+    WHERE dt_updated >= GETDATE() -2
+),
+latest_mapping_budget_client AS (
+    SELECT *
+    FROM mapping_budget_max_files_client
+    WHERE ranked = 1
+),
+-- mapping_cpm
+mapping_cpm_max_files_client AS (
+    SELECT
+        *,
+     RANK() OVER (PARTITION BY placement_id, placement order by dt_updated desc) as ranked
+    FROM mart_clients.mapping_cpm AS a
+    WHERE dt_updated >= GETDATE() -2
+),
+latest_mapping_cpm_client AS (
+    SELECT *
+    FROM mapping_cpm_max_files_client
+    WHERE ranked = 1
+),
+results_client AS (
+SELECT
+    lmb.campaign,
+    lmb.campaign_detailed,
+    null as line_item_id,
+    null as line_item_name,
+    asl.placement_id,
+    asl.placement_name,
+    asl."date",
+    SUM(
+        COALESCE(asl.impressions, 0) +
+        COALESCE(asl.impressions_1, 0) +
+        COALESCE(asl.impressions_2, 0)
+    ) AS impressions,    
+    SUM(
+        COALESCE(asl.clicks, 0) +
+        COALESCE(asl.clicks_1, 0) +
+        COALESCE(asl.clicks_2, 0)
+    ) AS clicks,
+    SUM(
+        COALESCE(asl.conversions, 0)) as conversions,
+    SUM(
+        COALESCE(asl.custom_conversion_1, 0) +
+        COALESCE(asl.custom_conversion_10, 0) +
+        COALESCE(asl.custom_conversion_2, 0) +
+        COALESCE(asl.custom_conversion_3, 0) +
+        COALESCE(asl.custom_conversion_4, 0) +
+        COALESCE(asl.custom_conversion_5, 0) +
+        COALESCE(asl.custom_conversion_6, 0) +
+        COALESCE(asl.custom_conversion_7, 0) +
+        COALESCE(asl.custom_conversion_8, 0) +
+        COALESCE(asl.custom_conversion_9, 0)
+    ) AS custom_conversions,
+    SUM(asl.conversions_clickthrough) AS conversions_clickthrough,
+    SUM(asl.conversions_viewthrough) AS conversions_viewthrough,
+    SUM(asl.video_started) AS video_started,
+    SUM(asl.video_fully_played) AS video_fully_played,
+    SUM(asl.impressions_eligible) AS impressions_eligible,
+    SUM(asl.impressions_measurable) AS impressions_measurable,
+    SUM(asl.impressions_viewable) AS impressions_viewable,
+    null as dsp_media_cost,
+    null as data_cost,
+    'Client' as data_source
+FROM latest_mapping_team_client AS lmt
+LEFT JOIN latest_mapping_budget_client AS lmb
+    ON UPPER(lmt.advertiser) = UPPER(lmb.advertiser)
+LEFT JOIN latest_mapping_cpm_client AS lmc
+    ON UPPER(lmb.campaign) = UPPER(lmc.campaign) 
+LEFT JOIN ad_server_latest AS asl
+    ON (UPPER(lmc.placement_id) = UPPER(asl.placement_id)
+    	AND asl.date BETWEEN lmb.mapped_start_date AND lmb.mapped_end_date)   
+WHERE lmb.dt_updated >= current_date - 2
+	AND lmt.dt_updated >= current_date - 2
+GROUP BY
+    lmb.campaign, 
+    lmb.campaign_detailed,
+    line_item_id,
+    line_item_name,
+    asl.placement_id,
+    asl.placement_name,
+    asl."date"
+),
+results as (
+SELECT * FROM results_client
+union  all
+select * from results_dsp
+)
+select * from results

@@ -1,4 +1,3 @@
---combined mapped queries
 WITH
 -- grouped costs
 grouped_dv360_data_costs AS
